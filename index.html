@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Order ice</title><link rel="stylesheet" href="style.css">
+</head><body><main>
+<h1 id="name"></h1><p class="sub" id="tag"></p>
+<p class="sub" id="hours" hidden></p>
+<div class="closed" id="closed" hidden></div>
+<div class="notice" id="notice" hidden></div>
+<h2>How many kg?</h2><div id="products"></div>
+<h2>Your details</h2>
+<label for="cname">Name</label><input id="cname" autocomplete="name">
+<label for="cphone">Phone number</label><input id="cphone" type="tel" autocomplete="tel">
+<label for="mode">Collection or delivery</label>
+<select id="mode"></select>
+<div id="addrWrap" hidden><label for="addr">Delivery address</label><textarea id="addr" rows="2"></textarea></div>
+<label for="when">When do you need it?</label><input id="when" placeholder="e.g. Saturday 10am">
+<label for="notes">Notes (optional)</label><textarea id="notes" rows="2"></textarea>
+<div class="lines" id="lines"></div>
+<div class="total" id="total"></div>
+<p class="sub" id="pay"></p>
+<div class="err" id="err" role="alert"></div>
+<div class="send" id="send"></div>
+<footer><a href="admin.html">Admin</a></footer>
+</main>
+<script src="config.js"></script>
+<script>
+const S = window.SHOP, $ = id => document.getElementById(id);
+const D = S.delivery || { enabled: false, fee: 0, freeAbove: 0 };
+const qty = {};
+const money = n => S.currency + (Math.round(n * 100) / 100).toLocaleString("en-ZA");
+$("name").textContent = S.name; $("tag").textContent = S.tagline; document.title = S.name;
+if (S.hours) { $("hours").textContent = "Hours: " + S.hours; $("hours").hidden = false; }
+if (S.notice) { $("notice").textContent = S.notice; $("notice").hidden = false; }
+if (S.payment) $("pay").textContent = S.payment;
+if (S.open === false) { $("closed").textContent = S.closedMessage || "Orders are closed."; $("closed").hidden = false; }
+
+["Collection"].concat(D.enabled ? ["Delivery"] : []).forEach(m => $("mode").add(new Option(m)));
+
+const list = $("products");
+S.products.forEach(p => {
+  qty[p.id] = 0;
+  const d = document.createElement("div");
+  d.className = "card" + (p.available ? "" : " off");
+  d.innerHTML = `<div class="row"><div><strong></strong><div class="price"></div></div><div class="qty"></div></div>`;
+  d.querySelector("strong").textContent = p.name;
+  d.querySelector(".price").textContent = p.available ? money(p.price) + " per kg" + (p.note ? " · " + p.note : "") : "Out of stock";
+  if (p.available) {
+    const q = d.querySelector(".qty");
+    q.innerHTML = `<button type="button" aria-label="Less">−</button><input type="number" min="0" step="${p.step}" value="0" aria-label="kg of ${p.name}"><button type="button" aria-label="More">+</button>`;
+    const inp = q.querySelector("input"), [minus, plus] = q.querySelectorAll("button");
+    const set = v => { v = Math.max(0, Number(v) || 0); if (v > 0 && v < p.min) v = p.min; qty[p.id] = v; inp.value = v; calc(); };
+    minus.onclick = () => set(qty[p.id] - p.step < p.min ? 0 : qty[p.id] - p.step);
+    plus.onclick = () => set(qty[p.id] === 0 ? p.min : qty[p.id] + p.step);
+    inp.onchange = () => set(inp.value);
+  }
+  list.appendChild(d);
+});
+
+const lines = () => S.products.filter(p => qty[p.id] > 0).map(p => ({ p, kg: qty[p.id], sub: qty[p.id] * p.price }));
+const isDel = () => $("mode").value === "Delivery";
+function totals() {
+  const sub = lines().reduce((a, l) => a + l.sub, 0);
+  const fee = isDel() && sub > 0 && !(D.freeAbove > 0 && sub >= D.freeAbove) ? (D.fee || 0) : 0;
+  return { sub, fee, total: sub + fee };
+}
+function calc() {
+  const t = totals();
+  $("lines").innerHTML = t.sub > 0 && isDel() ? `<div><span>Ice</span><span>${money(t.sub)}</span></div><div><span>Delivery</span><span>${t.fee ? money(t.fee) : "Free"}</span></div>` : "";
+  $("total").textContent = "Total: " + money(t.total);
+}
+$("mode").onchange = () => { $("addrWrap").hidden = !isDel(); calc(); };
+
+// remember details on this device
+const keep = ["cname", "cphone", "addr"];
+try { keep.forEach(k => { const v = localStorage.getItem("ice_" + k); if (v) $(k).value = v; }); } catch (e) {}
+
+function build(ref) {
+  const t = totals(), v = id => $(id).value.trim();
+  let m = `*New ice order ${ref}*\n`;
+  lines().forEach(l => m += `• ${l.p.name}: ${l.kg} kg = ${money(l.sub)}\n`);
+  if (isDel()) m += `Delivery: ${t.fee ? money(t.fee) : "Free"}\n`;
+  m += `*Total: ${money(t.total)}*\n\nName: ${v("cname")}\nPhone: ${v("cphone")}\n${$("mode").value}`;
+  if (isDel()) m += `: ${v("addr")}`;
+  if (v("when")) m += `\nWhen: ${v("when")}`;
+  if (v("notes")) m += `\nNotes: ${v("notes")}`;
+  return m;
+}
+function send(c) {
+  const e = $("err"), t = totals(); e.textContent = "";
+  if (S.open === false) return e.textContent = "Orders are closed right now.";
+  if (!lines().length) return e.textContent = "Add at least 1 kg of ice.";
+  if (S.minOrder > 0 && t.sub < S.minOrder) return e.textContent = "Minimum order is " + money(S.minOrder) + ".";
+  if (!$("cname").value.trim() || !$("cphone").value.trim()) return e.textContent = "Please enter your name and phone number.";
+  if (isDel() && !$("addr").value.trim()) return e.textContent = "Please enter a delivery address.";
+  try { keep.forEach(k => localStorage.setItem("ice_" + k, $(k).value.trim())); } catch (x) {}
+  const n = new Date(), ref = "#" + String(n.getDate()).padStart(2, "0") + String(n.getMonth() + 1).padStart(2, "0") + "-" + (100 + Math.floor(Math.random() * 900));
+  window.open("https://wa.me/" + c.number.replace(/\D/g, "") + "?text=" + encodeURIComponent(build(ref)), "_blank");
+}
+S.contacts.forEach((c, i) => {
+  const b = document.createElement("button"); b.type = "button";
+  b.className = i === 0 ? "primary" : ""; b.textContent = "Send order to " + c.name + " on WhatsApp";
+  b.onclick = () => send(c); $("send").appendChild(b);
+});
+calc();
+</script></body></html>

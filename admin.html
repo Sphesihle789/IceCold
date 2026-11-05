@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin</title><link rel="stylesheet" href="style.css">
+</head><body><main>
+<h1>Admin</h1>
+<div id="login">
+  <p class="sub">Enter the admin password.</p>
+  <input id="pw" type="password" aria-label="Password"><div class="err" id="lerr"></div>
+  <button class="primary" id="go" type="button">Log in</button>
+</div>
+<div id="panel" hidden>
+  <p class="sub">Change anything below, press <strong>Download config.js</strong>, then upload that file to your GitHub repo (replace the old one). The shop updates within a minute.</p>
+  <h2>Shop</h2>
+  <label>Shop name</label><input id="sname"><label>Tagline</label><input id="stag">
+  <label>Currency symbol</label><input id="scur">
+  <label>Notice on the shop page (leave empty for none)</label><input id="snotice" placeholder="e.g. Closed Sunday">
+  <label>Opening hours (shown to customers)</label><input id="shours">
+  <label class="chk"><input type="checkbox" id="sopen"> Taking orders (untick to pause the shop)</label>
+  <label>Message shown when paused</label><input id="sclosed">
+  <h2>Delivery, minimum and payment</h2>
+  <label class="chk"><input type="checkbox" id="dyes"> Offer delivery</label>
+  <div class="grid"><div><label>Delivery fee</label><input id="dfee" type="number" min="0"></div>
+  <div><label>Free delivery above (0 = never)</label><input id="dfree" type="number" min="0"></div></div>
+  <label>Minimum order value (0 = none)</label><input id="smin" type="number" min="0">
+  <label>Payment note</label><input id="spay">
+  <h2>WhatsApp contacts (digits only, with country code)</h2>
+  <div class="grid"><div><label>Contact 1 name</label><input id="n0"><label>Number</label><input id="w0" inputmode="numeric"></div>
+  <div><label>Contact 2 name</label><input id="n1"><label>Number</label><input id="w1" inputmode="numeric"></div></div>
+  <h2>Products</h2><div class="tbl" id="prods"></div>
+  <button type="button" id="add">Add product</button>
+  <h2>Admin password</h2><input id="spw">
+  <p class="err" id="perr"></p>
+  <button class="primary" type="button" id="dl">Download config.js</button>
+</div>
+<footer><a href="index.html">Back to shop</a></footer>
+</main>
+<script src="config.js"></script>
+<script>
+const S = JSON.parse(JSON.stringify(window.SHOP)), $ = id => document.getElementById(id);
+$("go").onclick = () => {
+  if ($("pw").value === S.adminPassword) { sessionStorage.ok = "1"; open_(); } else $("lerr").textContent = "Wrong password.";
+};
+$("pw").onkeydown = e => { if (e.key === "Enter") $("go").click(); };
+if (sessionStorage.ok === "1") open_();
+
+function open_() {
+  $("login").hidden = true; $("panel").hidden = false;
+  $("sname").value = S.name; $("stag").value = S.tagline; $("scur").value = S.currency; $("snotice").value = S.notice; $("spw").value = S.adminPassword;
+  const D = S.delivery || {};
+  $("shours").value = S.hours || ""; $("sopen").checked = S.open !== false; $("sclosed").value = S.closedMessage || "";
+  $("dyes").checked = !!D.enabled; $("dfee").value = D.fee || 0; $("dfree").value = D.freeAbove || 0;
+  $("smin").value = S.minOrder || 0; $("spay").value = S.payment || "";
+  [0, 1].forEach(i => { $("n" + i).value = (S.contacts[i] || {}).name || ""; $("w" + i).value = (S.contacts[i] || {}).number || ""; });
+  draw();
+}
+function draw() {
+  const box = $("prods"); box.innerHTML = "";
+  S.products.forEach((p, i) => {
+    const d = document.createElement("div"); d.className = "card";
+    d.innerHTML = `<label>Name</label><input data-k="name"><label>Short note (optional)</label><input data-k="note">
+      <div class="grid"><div><label>Price per kg</label><input data-k="price" type="number" min="0" step="0.5"></div>
+      <div><label>Minimum kg</label><input data-k="min" type="number" min="1" step="1"></div></div>
+      <div class="row"><label style="margin:0"><input type="checkbox" data-k="available" style="width:auto"> In stock</label><button type="button" class="danger">Remove</button></div>`;
+    d.querySelectorAll("[data-k]").forEach(el => {
+      const k = el.dataset.k;
+      if (k === "available") { el.checked = p.available; el.onchange = () => p.available = el.checked; }
+      else { el.value = p[k] ?? ""; el.oninput = () => p[k] = el.type === "number" ? Number(el.value) : el.value; }
+    });
+    d.querySelector(".danger").onclick = () => { S.products.splice(i, 1); draw(); };
+    box.appendChild(d);
+  });
+}
+$("add").onclick = () => { S.products.push({ id: "p" + Date.now(), name: "New product", price: 0, min: 1, step: 1, available: true }); draw(); };
+$("dl").onclick = () => {
+  const out = {
+    name: $("sname").value.trim(), tagline: $("stag").value.trim(), currency: $("scur").value.trim() || "R", notice: $("snotice").value.trim(),
+    hours: $("shours").value.trim(), open: $("sopen").checked, closedMessage: $("sclosed").value.trim(),
+    minOrder: Number($("smin").value) || 0, payment: $("spay").value.trim(),
+    delivery: { enabled: $("dyes").checked, fee: Number($("dfee").value) || 0, freeAbove: Number($("dfree").value) || 0 },
+    contacts: [0, 1].map(i => ({ name: $("n" + i).value.trim(), number: $("w" + i).value.replace(/\D/g, "") })).filter(c => c.number),
+    products: S.products, adminPassword: $("spw").value
+  };
+  if (!out.contacts.length) return $("perr").textContent = "Add at least one WhatsApp number.";
+  if (!out.adminPassword) return $("perr").textContent = "Password can't be empty.";
+  $("perr").textContent = "";
+  const js = "// All shop settings live here. Edit via admin.html (then upload the downloaded file) or edit directly on GitHub.\nwindow.SHOP = " + JSON.stringify(out, null, 2) + ";\n";
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([js], { type: "text/javascript" })); a.download = "config.js"; a.click();
+};
+</script></body></html>
